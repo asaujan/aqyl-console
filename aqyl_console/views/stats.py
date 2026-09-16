@@ -3,13 +3,11 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from aqyl_console.core import db, config, session, status_meaning
+from aqyl_console.core import db, config, status_meaning
+from aqyl_console.core.i18n import t
 
-st.set_page_config(page_title="Статистика", page_icon="📊", layout="wide")
-st.title("📊 Статистика синхронизации")
-st.caption("Сводка по таблице dl_device_sync: запросы, успех (Billing 200, e-Qural 204), регионы, платформы, ошибки Billing.")
-
-session.render_cookie_sidebar()
+st.title(f"📊 {t('page4_title')}")
+st.caption(t("page4_caption"))
 
 # Типы платформ Billing (для раздела с ошибками)
 BILLING_PLATFORMS = ("BILING-INSTALL", "BILING-REMOVE")
@@ -32,20 +30,21 @@ with st.form("stats_filters"):
     c1, c2, c3 = st.columns(3)
     with c1:
         region = st.selectbox(
-            "Регион", ["Все"] + [f"{k}: {v}" for k, v in config.REGIONS.items()]
+            t("filter_region"),
+            [t("all_option")] + [f"{k}: {v}" for k, v in config.REGIONS.items()],
         )
     with c2:
         default_from = dt.date.today() - dt.timedelta(days=14)
-        date_from = st.date_input("Дата с", value=default_from)
+        date_from = st.date_input(t("filter_date_from"), value=default_from)
     with c3:
-        date_to = st.date_input("Дата по", value=dt.date.today())
+        date_to = st.date_input(t("filter_date_to"), value=dt.date.today())
     platform = st.multiselect(
-        "Тип платформы", ["BILING-INSTALL", "BILING-REMOVE", "EQURAL", "KAZGAS_IOT"]
+        t("filter_platform"), ["BILING-INSTALL", "BILING-REMOVE", "EQURAL", "KAZGAS_IOT"]
     )
-    submitted = st.form_submit_button("Построить", type="primary")
+    submitted = st.form_submit_button(t("btn_build"), type="primary")
 
 if not submitted:
-    st.info("Задай период и нажми «Построить».")
+    st.info(t("stats_hint"))
     st.stop()
 
 # --- Общий WHERE для запросов ---
@@ -54,7 +53,7 @@ params: dict = {
     "df": str(date_from),
     "dt": str(date_to) + " 23:59:59",
 }
-if region != "Все":
+if region != t("all_option"):
     params["region"] = int(region.split(":")[0])
     where.append("region_code = :region")
 if platform:
@@ -114,11 +113,11 @@ try:
         err_params,
     )
 except Exception as e:
-    st.error(f"Ошибка запроса: {e}")
+    st.error(t("query_error", e=e))
     st.stop()
 
 if daily.empty:
-    st.warning("За выбранный период данных нет.")
+    st.warning(t("no_data_period"))
     st.stop()
 
 # --- Сводные метрики ---
@@ -127,28 +126,30 @@ ok_all = int(daily["ok"].fillna(0).sum())
 rate_all = (ok_all / total_all * 100) if total_all else 0.0
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Всего запросов", f"{total_all:,}".replace(",", " "))
-m2.metric("Успешных", f"{ok_all:,}".replace(",", " "))
-m3.metric("Процент успеха", f"{rate_all:.1f}%")
-m4.metric("Ошибок Billing", f"{len(billing_errors):,}".replace(",", " "))
+m1.metric(t("metric_total_requests"), f"{total_all:,}".replace(",", " "))
+m2.metric(t("metric_ok"), f"{ok_all:,}".replace(",", " "))
+m3.metric(t("metric_rate"), f"{rate_all:.1f}%")
+m4.metric(t("metric_billing_errors"), f"{len(billing_errors):,}".replace(",", " "))
 
 st.divider()
 
 # --- Динамика по дням ---
-st.subheader("Динамика по дням")
+st.subheader(t("daily_header"))
+rate_col = t("metric_rate")
+requests_col = t("col_requests")
 daily = daily.copy()
 daily["day"] = pd.to_datetime(daily["day"])
 daily["ok"] = daily["ok"].fillna(0).astype(int)
-daily["Процент успеха"] = (daily["ok"] / daily["total"] * 100).round(1)
+daily[rate_col] = (daily["ok"] / daily["total"] * 100).round(1)
 
 col_a, col_b = st.columns(2)
 with col_a:
-    st.caption("Количество запросов")
-    chart = daily.rename(columns={"total": "Запросы"}).set_index("day")[["Запросы"]]
+    st.caption(t("requests_count_caption"))
+    chart = daily.rename(columns={"total": requests_col}).set_index("day")[[requests_col]]
     st.bar_chart(chart)
 with col_b:
-    st.caption("Процент успеха (Billing 200, e-Qural 204), %")
-    st.line_chart(daily.set_index("day")[["Процент успеха"]])
+    st.caption(t("success_rate_caption"))
+    st.line_chart(daily.set_index("day")[[rate_col]])
 
 st.divider()
 
@@ -156,41 +157,44 @@ st.divider()
 col_r, col_p = st.columns(2)
 
 with col_r:
-    st.subheader("По регионам")
+    st.subheader(t("by_region_header"))
     if by_region.empty:
-        st.caption("Нет данных.")
+        st.caption(t("no_data"))
     else:
+        region_col = t("col_region")
+        pct_col = t("col_success_pct")
         by_region = by_region.copy()
         by_region["ok"] = by_region["ok"].fillna(0).astype(int)
-        by_region["Регион"] = by_region["region_code"].map(
-            lambda c: f"{c}: {config.REGIONS.get(int(c), '?')}" if pd.notna(c) else "нет кода"
+        by_region[region_col] = by_region["region_code"].map(
+            lambda c: f"{c}: {config.REGIONS.get(int(c), '?')}" if pd.notna(c) else t("no_region_code")
         )
-        by_region["Успех, %"] = (by_region["ok"] / by_region["total"] * 100).round(1)
-        st.bar_chart(by_region.set_index("Регион")[["total"]].rename(columns={"total": "Запросы"}))
+        by_region[pct_col] = (by_region["ok"] / by_region["total"] * 100).round(1)
+        st.bar_chart(by_region.set_index(region_col)[["total"]].rename(columns={"total": requests_col}))
         st.dataframe(
-            by_region.rename(columns={"total": "Всего", "ok": "Успешных"})[
-                ["Регион", "Всего", "Успешных", "Успех, %"]
+            by_region.rename(columns={"total": t("col_total"), "ok": t("col_ok")})[
+                [region_col, t("col_total"), t("col_ok"), pct_col]
             ],
             use_container_width=True,
             hide_index=True,
         )
 
 with col_p:
-    st.subheader("По типу платформы")
+    st.subheader(t("by_platform_header"))
     if by_platform.empty:
-        st.caption("Нет данных.")
+        st.caption(t("no_data"))
     else:
+        pct_col = t("col_success_pct")
         by_platform = by_platform.copy()
         by_platform["ok"] = by_platform["ok"].fillna(0).astype(int)
-        by_platform["platform_type"] = by_platform["platform_type"].fillna("нет типа")
-        by_platform["Успех, %"] = (by_platform["ok"] / by_platform["total"] * 100).round(1)
+        by_platform["platform_type"] = by_platform["platform_type"].fillna(t("no_platform_type"))
+        by_platform[pct_col] = (by_platform["ok"] / by_platform["total"] * 100).round(1)
         st.bar_chart(
-            by_platform.set_index("platform_type")[["total"]].rename(columns={"total": "Запросы"})
+            by_platform.set_index("platform_type")[["total"]].rename(columns={"total": requests_col})
         )
         st.dataframe(
             by_platform.rename(
-                columns={"platform_type": "Тип платформы", "total": "Всего", "ok": "Успешных"}
-            )[["Тип платформы", "Всего", "Успешных", "Успех, %"]],
+                columns={"platform_type": t("filter_platform"), "total": t("col_total"), "ok": t("col_ok")}
+            )[[t("filter_platform"), t("col_total"), t("col_ok"), pct_col]],
             use_container_width=True,
             hide_index=True,
         )
@@ -198,38 +202,37 @@ with col_p:
 st.divider()
 
 # --- Топ ошибок Billing по паттернам ---
-st.subheader("Топ ошибок Billing по паттернам")
-st.caption(
-    "Ошибки (не 200) по платформам "
-    + ", ".join(BILLING_PLATFORMS)
-    + ", сгруппированные по тексту ответа."
-)
+st.subheader(t("top_errors_header"))
+st.caption(t("top_errors_caption", platforms=", ".join(BILLING_PLATFORMS)))
 
 if billing_errors.empty:
-    st.success("Ошибок Billing за период нет.")
+    st.success(t("no_billing_errors"))
 else:
+    category_col = t("col_category")
+    count_col = t("col_count")
+    share_col = t("col_share_pct")
     err = billing_errors.copy()
-    err["Категория"] = err["response_body"].map(classify)
+    err[category_col] = err["response_body"].map(classify)
     grouped = (
-        err.groupby("Категория")
+        err.groupby(category_col)
         .size()
-        .reset_index(name="Количество")
-        .sort_values("Количество", ascending=False)
+        .reset_index(name=count_col)
+        .sort_values(count_col, ascending=False)
     )
-    total_err = int(grouped["Количество"].sum())
-    grouped["Доля, %"] = (grouped["Количество"] / total_err * 100).round(1)
+    total_err = int(grouped[count_col].sum())
+    grouped[share_col] = (grouped[count_col] / total_err * 100).round(1)
 
-    col_c, col_t = st.columns([1, 1])
+    col_c, col_t2 = st.columns([1, 1])
     with col_c:
-        st.bar_chart(grouped.set_index("Категория")[["Количество"]])
-    with col_t:
+        st.bar_chart(grouped.set_index(category_col)[[count_col]])
+    with col_t2:
         st.dataframe(grouped, use_container_width=True, hide_index=True)
 
     # Примеры сообщений по категориям (для уточнения паттернов)
-    with st.expander("Примеры сообщений по категориям"):
-        for cat in grouped["Категория"]:
+    with st.expander(t("samples_expander")):
+        for cat in grouped[category_col]:
             samples = (
-                err.loc[err["Категория"] == cat, "response_body"]
+                err.loc[err[category_col] == cat, "response_body"]
                 .dropna()
                 .astype(str)
                 .str.strip()

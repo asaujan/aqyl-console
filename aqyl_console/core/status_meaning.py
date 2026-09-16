@@ -2,33 +2,37 @@
 
 Смысл кода зависит от платформы: у EQURAL успех это 204 (No Content),
 у Billing успех это 200. Тексты без длинного тире (стиль проекта).
+Человекочитаемые расшифровки хранятся ключами переводов (core.i18n),
+поэтому язык вывода следует за переключателем RU/EN.
 """
 import pandas as pd
 
-# Смысл HTTP-кода в разрезе платформы. Ключи внешнего словаря совпадают
-# с platform_type в dl_device_sync.
-HTTP_MEANING = {
+from aqyl_console.core.i18n import t
+
+# Ключ перевода смысла HTTP-кода в разрезе платформы. Ключи внешнего словаря
+# совпадают с platform_type в dl_device_sync.
+HTTP_MEANING_KEYS = {
     "BILING-INSTALL": {
-        200: "Успешно принято Billing",
-        400: "Отклонено Billing (см. текст)",
-        401: "Сессия истекла",
-        500: "Внутренняя ошибка 1С",
-        502: "Billing недоступен",
+        200: "http_billing_200",
+        400: "http_billing_400",
+        401: "http_401",
+        500: "http_billing_500",
+        502: "http_billing_502",
     },
     "BILING-REMOVE": {
-        200: "Успешно принято Billing",
-        400: "Отклонено Billing (см. текст)",
-        401: "Сессия истекла",
-        500: "Внутренняя ошибка 1С",
-        502: "Billing недоступен",
+        200: "http_billing_200",
+        400: "http_billing_400",
+        401: "http_401",
+        500: "http_billing_500",
+        502: "http_billing_502",
     },
     "EQURAL": {
-        204: "Успешно (No Content)",
-        400: "Отклонено e-Qural (проверь реестр)",
-        500: "Ошибка сервера",
+        204: "http_equral_204",
+        400: "http_equral_400",
+        500: "http_equral_500",
     },
     "KAZGAS_IOT": {
-        200: "Успешно",
+        200: "http_kazgas_200",
     },
 }
 
@@ -55,11 +59,11 @@ def http_meaning(platform, code) -> str:
     """Смысл HTTP-кода для платформы. Неизвестное сочетание даёт 'HTTP N'."""
     c = _to_int(code)
     plat = str(platform).strip() if platform is not None else ""
-    table = HTTP_MEANING.get(plat, {})
+    table = HTTP_MEANING_KEYS.get(plat, {})
     if c is None:
-        return "нет кода"
+        return t("status_no_code")
     if c in table:
-        return table[c]
+        return t(table[c])
     return f"HTTP {c}"
 
 
@@ -73,23 +77,15 @@ def is_success(platform, code) -> bool:
 
 
 # Категории ошибок Billing по подстрокам в тексте ответа. Порядок важен,
-# первое совпадение определяет категорию.
+# первое совпадение определяет категорию. Значение: ключи перевода
+# (метка, пояснение). Подстроки не переводятся, ответы Billing всегда русские.
 _BILLING_RULES = [
-    (["уже есть в системе"],
-     ("Дубликат в 1С",
-      "Счётчик числится в 1С, хотя на MMS дубля нет. Разбирается на стороне Billing.")),
+    (["уже есть в системе"], ("err_dup", "err_dup_desc")),
     (["точка учета не заполнена", "заблокирована", "уже установлен"],
-     ("Точка учёта занята",
-      "Старый счётчик не снят, точка занята. Нужно снятие в 1С.")),
-    (["не найден прибор учета"],
-     ("ПУ не найден в 1С",
-      "Счётчика нет в 1С по этому номеру.")),
-    (["не найден абонент", "лицевой счет"],
-     ("ЛС не найден в 1С",
-      "Лицевой счёт отсутствует в 1С.")),
-    (["ошибка при снятии", "context method"],
-     ("Внутренняя ошибка 1С при снятии",
-      "Сбой на стороне 1С при обработке снятия.")),
+     ("err_point_busy", "err_point_busy_desc")),
+    (["не найден прибор учета"], ("err_no_meter", "err_no_meter_desc")),
+    (["не найден абонент", "лицевой счет"], ("err_no_account", "err_no_account_desc")),
+    (["ошибка при снятии", "context method"], ("err_remove_fail", "err_remove_fail_desc")),
 ]
 
 
@@ -97,15 +93,15 @@ def classify_billing_error(text) -> tuple[str, str]:
     """Категория и пояснение ошибки Billing по тексту ответа.
 
     text может быть NaN/None/не строкой, безопасно приводим к str.
-    Возвращает ('Прочее', первые 100 символов) если ничего не подошло.
+    Возвращает (Прочее/Other, первые 100 символов) если ничего не подошло.
     """
     if text is None or (not isinstance(text, str) and pd.isna(text)):
-        return ("Прочее", "")
+        return (t("err_other"), "")
     s = str(text)
     low = s.lower()
     if not low.strip() or low.strip() == "nan":
-        return ("Прочее", "")
-    for needles, result in _BILLING_RULES:
+        return (t("err_other"), "")
+    for needles, (label_key, desc_key) in _BILLING_RULES:
         if any(n in low for n in needles):
-            return result
-    return ("Прочее", s[:100])
+            return (t(label_key), t(desc_key))
+    return (t("err_other"), s[:100])

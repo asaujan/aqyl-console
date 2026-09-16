@@ -44,19 +44,5 @@ REGIONS = {
     79: "Шымкент",
 }
 
-# Human-readable column names for dl_device_sync
-SYNC_COLUMNS_RU = {
-    "id": "ID",
-    "device_no": "Счётчик (ПУ)",
-    "platform_type": "Тип платформы",
-    "status": "Статус",
-    "response_status": "HTTP",
-    "region_code": "Регион",
-    "create_time": "Создано",
-    "update_time": "Обновлено",
-    "result_msg": "Сообщение",
-    "push_count": "Кол-во пушей",
-    "response_body": "Ответ",
-    "request_body": "Запрос",
-    "api_url": "API URL",
-}
+# Человекочитаемые названия колонок dl_device_sync переехали в core/i18n.py
+# (ключи col_*, функция sync_columns), чтобы следовать за языком интерфейса.

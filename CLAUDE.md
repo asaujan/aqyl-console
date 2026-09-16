@@ -3,16 +3,21 @@
 Streamlit-пульт для интеграционной команды QGA/Goldcard. Работает локально через VPN.
 
 ## Архитектура
-- `aqyl_console/app.py`: главная страница (статус подключений)
-- `aqyl_console/pages/`: вкладки Streamlit (нумерованные файлы = порядок в меню)
+- `aqyl_console/app.py`: точка входа. Программная навигация: st.navigation + st.Page,
+  заголовки меню из переводов (`t("nav_*")`), сайдбар (язык, куки) общий для всех страниц
+- `aqyl_console/views/`: страницы (home, sync, repush, billing, stats, equral),
+  порядок и заголовки задаются в app.py, имена файлов в меню не участвуют
 - `aqyl_console/core/`: логика:
   - `config.py`: чтение .env, справочники (регионы, русские названия колонок)
   - `db.py`: SQLAlchemy + pymysql к MySQL `device_life`, expanding IN для tuple-параметров
   - `mms.py`: клиент репуша `/api/device-sync-records/{id}/repush`
   - `billing.py`: сервисы 1С (`mmsclientdata`, `mmscheckmeterstatus`)
-  - `session.py`: MMS-куки в session_state. `get_mms_cookie()` берёт куки из UI,
-    иначе из `config.MMS_COOKIE` (.env). Поле ввода: expander на странице репуша
-    и поле в сайдбаре (`render_cookie_sidebar`).
+  - `i18n.py`: переводы RU/EN, `t(key)` читает язык из st.session_state["lang"]
+  - `session.py`: язык и MMS-куки в фиксированных ключах session_state
+    ("lang", "mms_cookie"), виджеты живут под своими ключами и синхронизируются
+    через on_change/посев, поэтому значения переживают переход между страницами.
+    `get_mms_cookie()` берёт куки из UI, иначе из `config.MMS_COOKIE` (.env).
+    Поле ввода: expander на странице репуша и поле в сайдбаре.
 
 ## Ключевые факты домена
 - Таблица `dl_device_sync`: лог запросов MMS→Billing/e-Qural. Поля: id, device_no,

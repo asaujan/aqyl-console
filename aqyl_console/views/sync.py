@@ -3,34 +3,35 @@ import io
 import pandas as pd
 import streamlit as st
 
-from aqyl_console.core import db, config, session, status_meaning
+from aqyl_console.core import db, config, status_meaning
+from aqyl_console.core.i18n import t, sync_columns
 
-st.set_page_config(page_title="Просмотр синхронизации", page_icon="📋", layout="wide")
-st.title("📋 Просмотр синхронизации")
-
-session.render_cookie_sidebar()
+st.title(f"📋 {t('page1_title')}")
 
 with st.form("filters"):
     c1, c2, c3 = st.columns(3)
     with c1:
-        region = st.selectbox("Регион", ["Все"] + [f"{k}: {v}" for k, v in config.REGIONS.items()])
+        region = st.selectbox(
+            t("filter_region"),
+            [t("all_option")] + [f"{k}: {v}" for k, v in config.REGIONS.items()],
+        )
         platform = st.multiselect(
-            "Тип платформы",
+            t("filter_platform"),
             ["BILING-INSTALL", "BILING-REMOVE", "EQURAL", "KAZGAS_IOT"],
         )
     with c2:
-        status = st.multiselect("HTTP статус", [200, 204, 400, 401, 500, 502])
-        device_no = st.text_input("Счётчик (device_no)")
+        status = st.multiselect(t("filter_http"), [200, 204, 400, 401, 500, 502])
+        device_no = st.text_input(t("filter_device"))
     with c3:
-        date_from = st.date_input("Дата с", value=None)
-        date_to = st.date_input("Дата по", value=None)
-    limit = st.slider("Лимит строк", 100, 10000, 1000, step=100)
-    submitted = st.form_submit_button("Показать", type="primary")
+        date_from = st.date_input(t("filter_date_from"), value=None)
+        date_to = st.date_input(t("filter_date_to"), value=None)
+    limit = st.slider(t("filter_limit"), 100, 10000, 1000, step=100)
+    submitted = st.form_submit_button(t("btn_show"), type="primary")
 
 if submitted:
     where = []
     params = {}
-    if region != "Все":
+    if region != t("all_option"):
         params["region"] = int(region.split(":")[0])
         where.append("region_code = :region")
     if platform:
@@ -58,15 +59,17 @@ if submitted:
     try:
         df = db.run_query(sql, params)
     except Exception as e:
-        st.error(f"Ошибка запроса: {e}")
+        st.error(t("query_error", e=e))
         st.stop()
 
-    st.caption(f"Найдено строк: {len(df)}")
+    st.caption(t("rows_found", n=len(df)))
 
     # Смысл HTTP-кода (с учётом платформы) и категория ошибки Billing.
     if "response_status" in df.columns and "platform_type" in df.columns:
+        meaning_col = t("col_status_meaning")
+        category_col = t("col_error_category")
         df = df.copy()
-        df["Смысл статуса"] = [
+        df[meaning_col] = [
             status_meaning.http_meaning(p, c)
             for p, c in zip(df["platform_type"], df["response_status"])
         ]
@@ -82,24 +85,24 @@ if submitted:
             text = row[body_col] if body_col else None
             return status_meaning.classify_billing_error(text)[0]
 
-        df["Категория ошибки"] = df.apply(_cat, axis=1)
+        df[category_col] = df.apply(_cat, axis=1)
 
-        # Поставим "Смысл статуса" сразу за HTTP-колонкой.
+        # Поставим смысл статуса сразу за HTTP-колонкой.
         cols = list(df.columns)
-        cols.remove("Смысл статуса")
-        cols.remove("Категория ошибки")
+        cols.remove(meaning_col)
+        cols.remove(category_col)
         pos = cols.index("response_status") + 1
-        cols[pos:pos] = ["Смысл статуса", "Категория ошибки"]
+        cols[pos:pos] = [meaning_col, category_col]
         df = df[cols]
 
-    show = df.rename(columns=config.SYNC_COLUMNS_RU)
+    show = df.rename(columns=sync_columns())
     st.dataframe(show, use_container_width=True, height=500)
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         show.to_excel(w, index=False, sheet_name="sync")
     st.download_button(
-        "⬇ Экспорт в Excel",
+        t("export_excel"),
         buf.getvalue(),
         file_name="sync_export.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
