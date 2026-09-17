@@ -19,44 +19,81 @@ if not session.has_mms_cookie():
 
 
 def run_repush(ids, delay, platform_map=None):
-    """Гонит репуш по списку id с прогресс-баром и живым логом.
+    """Гонит репуш одним непрерывным проходом по всему списку id.
+
+    Внутри цикла нет записи в session_state, нет st.rerun и нет создания
+    новых виджетов: прогресс и живой лог обновляются только через
+    плейсхолдеры, созданные до цикла. Падение отдельного запроса
+    логируется и не прерывает прогон. Результат возвращается целиком,
+    вывод и сохранение делает вызывающий код после завершения цикла.
 
     platform_map: dict id -> platform_type, чтобы показать смысл статуса
     с учётом платформы (у EQURAL успех это 204, у Billing 200).
     """
     ids = [int(x) for x in ids]
     platform_map = platform_map or {}
-    progress = st.progress(0.0)
-    log_area = st.empty()
-    results = []
     total = len(ids)
     meaning_col = t("col_meaning_short")
+    note = st.empty()
+    note.info(t("repush_running"))
+    progress = st.progress(0.0, text=t("processed_of", i=0, total=total))
+    log_area = st.empty()
+    results = []
     for i, rid in enumerate(ids, start=1):
-        status, body = mms.repush(rid)
-        plat = platform_map.get(rid)
+        try:
+            status, body = mms.repush(rid)
+        except Exception as e:
+            status, body = 0, f"ERR: {type(e).__name__}: {e}"
+        try:
+            meaning = status_meaning.http_meaning(platform_map.get(rid, ""), status)
+        except Exception:
+            meaning = f"HTTP {status}"
         results.append({
             "id": rid,
             "http": status,
-            meaning_col: status_meaning.http_meaning(plat, status) if plat else status_meaning.http_meaning("", status),
-            "response": body[:120],
+            meaning_col: meaning,
+            "response": (body or "")[:120],
         })
-        progress.progress(i / total)
+        progress.progress(i / total, text=t("processed_of", i=i, total=total))
         log_area.dataframe(pd.DataFrame(results[-15:]), use_container_width=True)
-        time.sleep(delay)
+        if i < total:
+            time.sleep(delay)
+    note.empty()
+    progress.empty()
+    log_area.empty()
     res_df = pd.DataFrame(results)
     # Успех считаем с учётом платформы, где она известна.
     ok = int(sum(
         status_meaning.is_success(platform_map.get(r["id"], ""), r["http"])
         for _, r in res_df.iterrows()
     ))
-    st.success(t("done_ok_fail", ok=ok, fail=len(res_df) - ok))
+    return res_df, ok
+
+
+# Прогон выполняется здесь, в начале страницы, отдельным чистым проходом:
+# кнопка только кладёт задание в session_state и делает один rerun до цикла.
+# Во время цикла ниже по странице ещё не отрисованы data_editor и кнопки,
+# поэтому их события не могут прервать выполнение (плюс runner.fastReruns
+# выключен в .streamlit/config.toml, входящие rerun ждут конца прогона).
+_job = st.session_state.pop("repush_job", None)
+if _job:
+    _df, _ok = run_repush(_job["ids"], _job["delay"], _job["pmap"])
+    st.session_state["repush_result"] = {"df": _df, "ok": _ok}
+
+_res = st.session_state.get("repush_result")
+if _res is not None:
+    _df = _res["df"]
+    st.subheader(t("last_repush_header"))
+    st.success(t("done_ok_fail", ok=_res["ok"], fail=len(_df) - _res["ok"]))
+    st.dataframe(_df, use_container_width=True, height=250)
     st.download_button(
         t("download_log"),
-        res_df.to_csv(index=False).encode(),
+        _df.to_csv(index=False).encode(),
         file_name="repush_log.csv",
         mime="text/csv",
+        key="repush_result_dl",
     )
-    return res_df
+    st.divider()
 
 
 def select_from_table(found, key):
@@ -127,8 +164,17 @@ def select_from_table(found, key):
     ):
         pmap = {}
         if "platform_type" in selected.columns:
-            pmap = {int(r["id"]): r["platform_type"] for _, r in selected.iterrows()}
-        run_repush(selected["id"].tolist(), delay, pmap)
+            # platform_type может быть NaN (id из файла без записи в базе).
+            pmap = {
+                int(r["id"]): r["platform_type"] if isinstance(r["platform_type"], str) else ""
+                for _, r in selected.iterrows()
+            }
+        st.session_state["repush_job"] = {
+            "ids": [int(x) for x in selected["id"].tolist()],
+            "delay": float(delay),
+            "pmap": pmap,
+        }
+        st.rerun()
     return selected["id"].tolist()
 
 
